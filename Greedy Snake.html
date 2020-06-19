@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <style>
+        #map {
+            position: relative;
+            width: 400px;
+            height: 400px;
+            background-color: black;
+        }
+
+        input {
+            width: 30px
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map"></div>
+    <div id="grade" style="font-size: x-large;">Score : 0</div>
+    <div id="controlBar">
+        <div>Control：Use keyboard：  Up-⬆ Down-⬇ Left-⬅ Right-➡</div>
+        <div>
+            <span>Set Winning Score</span>
+            <input id="win_score" type="text" value=20>
+        </div>
+        <button id="start">Start</button>
+        <button id="pause">Pause</button>
+    </div>
+</body>
+<script>
+    class Event {
+        events = {} //event pool:record all fns related event
+        on(eventName, fn) {//add a fn for a event
+            if (!this.events[eventName]) {
+                this.events[eventName] = [];
+            }
+            if (!this.events[eventName].includes(fn)) {
+                this.events[eventName].push(fn);
+            }
+        }
+        off(eventName, fn) { //delete a fn for a event
+            if (!this.events[eventName]) {
+                return;
+            }
+            this.events[eventName] = this.events[eventName].filter(item => item != fn);
+        }
+        dispatch(eventName, ...arg) { //trigger a fn for a event
+            if (!this.events[eventName]) {
+                return;
+            }
+            this.events[eventName].forEach(item => {
+                item.call(this, ...arg);
+            });
+        }
+    }
+
+    class Map {
+        constructor(el, rect = 10) {
+            this.el = el
+            this.rect = rect
+            this.data = []
+            this.rows = Math.ceil(Map.getStyle(el, "height") / rect)
+            this.columns = Math.ceil(Map.getStyle(el, "width") / rect)
+            let a = Map.setStyle(el, "width", this.cloumn * rect)
+            Map.setStyle(el, "height", this.rows * rect)
+            Map.setStyle(el, "width", this.columns * rect)
+        }
+
+        static getStyle(el, attr) {
+            return parseFloat(getComputedStyle(el)[attr])
+        }
+        static setStyle(el, attr, value) {
+            el.style[attr] = value + "px"
+        }
+        setData(newData) {
+            this.data = this.data.concat(newData)
+        }
+        clearData() {
+            this.data = []
+        }
+        include({ x, y }) {
+            return this.data.some(item => (item.x == x && item.y == y))
+        }
+        render() {
+            this.el.innerHTML = this.data.map(item => {
+                return `<span style="position:absolute;left:${item.x * this.rect}px;top:${item.y * this.rect}px;width:${this.rect}px;height:${this.rect}px;background-color:${item.color};"></span>`
+            })
+
+        }
+    }
+
+    class Food {
+        constructor(columns = 10, rows = 10, colors = ['#ff0', '#0ff', '#f0f']) {
+            this.columns = columns;
+            this.rows = rows;
+            this.data = null;
+            this.colors = colors;
+            this.create()
+        }
+        create() {
+            let x = Math.floor(Math.random() * this.columns);
+            let y = Math.floor(Math.random() * this.rows);
+            let color = this.colors[Math.floor(Math.random() * (this.colors.length))]
+            this.data = { x, y, color }
+        }
+    }
+
+    class Snake {
+        constructor() {
+            this.direction = "right"
+            this.data = [
+                {
+                    x: 6,
+                    y: 6,
+                    color: "red"
+                },
+                {
+                    x: 5,
+                    y: 6,
+                    color: "#fff"
+                },
+                {
+                    x: 4,
+                    y: 6,
+                    color: "#fff"
+                },
+                {
+                    x: 3,
+                    y: 6,
+                    color: "#fff"
+                },
+            ];
+        }
+        move() {
+            let i = this.data.length - 1
+            this.lastData = {
+                x: this.data[i].x,
+                y: this.data[i].y,
+                color: this.data[i].color
+            }
+            //set snake body move
+            for (i; i > 0; i--) {
+                this.data[i].x = this.data[i - 1].x;
+                this.data[i].y = this.data[i - 1].y;
+            }
+            //set snake head move
+            switch (this.direction) {
+                case "right":
+                    this.data[0].x++;
+                    break;
+                case "left":
+                    this.data[0].x--;
+                    break;
+                case "top":
+                    this.data[0].y--;
+                    break;
+                case "bottom":
+                    this.data[0].y++;
+                    break;
+            }
+        }
+        changeDir(dir) {
+            //if snake is moving vertically only can change to herizontal, vice versa
+            if (this.direction === "left" || this.direction === "right") {
+                if (dir === "left" || dir === "right") {
+                    return false;
+                }
+            } else {
+                if (dir === "top" || dir === "bottom") {
+                    return false;
+                }
+            }
+            this.direction = dir;
+            return true;
+
+        }
+        eatFood() {
+            this.data.push(this.lastData)
+        }
+    }
+
+    class Game extends Event {
+        constructor(el, rect, toControl = null) {
+            super();
+            this.map = new Map(el, rect);
+            this.food = new Food(this.map.columns, this.map.rows);
+            this.snake = new Snake(this.map);
+            this.map.setData(this.snake.data);
+            this.createFood();
+            this.render();
+            this.timer = 0;
+            this.grade = 0;
+            this.interval = 200;
+            this.toControl = toControl;
+            this.keyDown = this.keyDown.bind(this)
+        }
+        start(winScore = 20) {
+            this.move(winScore);
+        }
+        //render to map
+        render() {
+            this.map.clearData();
+            this.map.setData(this.snake.data)
+            this.map.setData(this.food.data)
+            this.map.render()
+        }
+        createFood() {
+            this.food.create();
+            if (this.map.include(this.food.data)) {
+                this.createFood();
+            }
+            this.map.setData(this.food.data);
+        }
+        clearInte() {
+            clearInterval(this.timer)
+        }
+        //control moving
+        move(winScore) {
+            this.clearInte();
+            this.timer = setInterval(() => {
+                this.snake.move();
+                if (this.isEat()) {
+                    this.snake.eatFood();
+                    this.createFood();
+                    this.grade++
+                    this.changeGrade()
+                    this.interval *= 0.95
+                    this.clearInte();
+                    this.start(winScore)
+                    if (this.grade >= winScore) {
+                        this.over(1);
+                    }
+                }
+                if (this.isOver()) {
+                    this.over(0)
+                }
+                this.render();
+            }, this.interval)
+
+        }
+        isEat() {
+            return this.snake.data[0].x === this.food.data.x && this.snake.data[0].y === this.food.data.y
+        }
+        isOver() {
+            //if snake is out of map
+            if (this.snake.data[0].x < 0
+                || this.snake.data[0].x >= this.map.columns
+                || this.snake.data[0].y < 0
+                || this.snake.data[0].y >= this.map.rows) {
+                return true
+            }
+
+            //if snake is creash itself
+            for (let i = 1; i < this.snake.data.length; i++) {
+                if (this.snake.data[0].x == this.snake.data[i].x && this.snake.data[0].y == this.snake.data[i].y) {
+                    return true
+                }
+            }
+            return false;
+        }
+        //overState = 0 snake dead
+        //          = 1 win the game
+        over(overState = 0) {
+            if (overState) {
+                alert("Winner")
+            } else {
+                alert("game over")
+            }
+            this.clearInte();
+        }
+        keyDown({ keyCode }) {
+            //37-left 38-top 39-right 40-bottom
+            //65-a-left 87-w-top 68-d-right 83-s-bottom 
+            switch (keyCode) {
+                case 37:
+                    this.snake.changeDir("left")
+                    break;
+                case 38:
+                    this.snake.changeDir("top")
+                    break;
+                case 39:
+                    this.snake.changeDir("right")
+                    break;
+                case 40:
+                    this.snake.changeDir("bottom")
+                    break;
+            }
+        }
+        control() {
+            if (this.toControl) {
+                this.toControl();
+                return;
+            }
+            window.addEventListener("keydown", this.keyDown)
+        }
+        addControl(fn) {
+            window.removeEventListener("keydown", this.keyDown)
+            fn.call(this);
+        }
+        changeGrade() {
+            let score = document.querySelector("#grade")
+            score.innerHTML = "Score : " + this.grade
+        }
+    }
+
+    {//call function
+        let map = document.querySelector("#map")
+        let game = new Game(map, 10)
+        let start = document.querySelector("#start")
+
+        start.onclick = function () {
+            let winScore = document.querySelector("#win_score").value
+            let reg = /^[1-9]+[0-9]*/g
+            if (reg.test(winScore)) {
+                game.start(winScore);
+                game.control()
+            } else {
+                alert("Winning Score must be a number")
+            }
+        }
+        document.querySelector("#pause").onclick = () => game.clearInte()
+    }
+</script>
+
+</html>
